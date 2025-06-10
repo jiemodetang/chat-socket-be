@@ -3,6 +3,7 @@ const chatController = require('../controllers/chatController');
 const { protect } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 
 const router = express.Router();
 
@@ -49,15 +50,31 @@ const fileFilter = (req, file, cb) => {
   // 允许的文件类型
   const allowedTypes = {
     'image': ['image/jpeg', 'image/png', 'image/gif'],
-    'audio': ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a']
+    'audio': ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a'],
+    'document': [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain'
+    ],
+    'video': [
+      'video/mp4',
+      'video/quicktime',
+      'video/x-msvideo',
+      'video/x-ms-wmv',
+      'video/webm'
+    ]
   };
 
-  // 根据上传类型检查文件类型
-  const uploadType = req.path.includes('audio') ? 'audio' : 'image';
-  if (allowedTypes[uploadType].includes(file.mimetype)) {
+  // 检查文件类型是否在允许列表中
+  const isAllowed = Object.values(allowedTypes).some(types => types.includes(file.mimetype));
+  
+  if (isAllowed) {
     cb(null, true);
   } else {
-    cb(new Error(`不支持的文件类型。允许的类型: ${allowedTypes[uploadType].join(', ')}`), false);
+    cb(new Error('不支持的文件类型。允许的类型包括：图片(jpg, png, gif)、音频(mp3, wav, ogg, m4a)、文档(pdf, doc, docx, xls, xlsx, txt)和视频(mp4, mov, avi, wmv, webm)'), false);
   }
 };
 
@@ -66,14 +83,11 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB 限制
+    fileSize: 50 * 1024 * 1024, // 增加到 50MB 限制
   }
 });
 
-// 聊天图片上传接口
-router.post('/upload-image', upload.single('image'), chatController.uploadChatImage);
-
-// 聊天音频上传接口
-router.post('/upload-audio', upload.single('audio'), chatController.uploadChatAudio);
+// 统一文件上传接口
+router.post('/upload', upload.single('file'), chatController.uploadFile);
 
 module.exports = router;

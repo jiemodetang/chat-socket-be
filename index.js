@@ -1,6 +1,5 @@
 const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
@@ -12,26 +11,10 @@ dotenv.config();
 // 创建Express应用
 const app = express();
 
-// 精确指定允许的来源
-const allowedOrigins = [
-  'http://localhost:5173',  // 你的前端开发地址
-  'http://82.156.51.236',  // 你的生产环境地址
-  'http://82.156.51.236:3000' // 添加API服务器地址
-];
-
-// 修改CORS中间件配置
+// 配置CORS中间件允许所有来源
 app.use(cors({
-  origin: function(origin, callback) {
-    // 允许没有origin的请求（如移动应用或curl请求）
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = `CORS策略阻止了来自${origin}的请求`;
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE','PATCH'],
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true  // 允许携带凭证
 }));
@@ -54,30 +37,11 @@ app.use((req, res, next) => {
   
   next();
 });
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 创建HTTP服务器
 const server = http.createServer(app);
-
-// 创建Socket.io实例
-const io = socketIo(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
-  transports: ['websocket'], // 只使用websocket传输
-  allowEIO3: true,
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  connectTimeout: 45000,
-  maxHttpBufferSize: 1e8,
-  path: '/socket.io/',
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000
-});
 
 // 连接MongoDB
 const connectDB = async () => {
@@ -106,8 +70,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/chats', chatRoutes);
 
-// 导入Socket处理程序
-require('./socket')(io);
+// 导入WebSocket处理程序
+require('./socket')(server);
 
 // 基础路由
 app.get('/', (req, res) => {
@@ -118,5 +82,14 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`服务器运行在端口 ${PORT}`);
-  console.log(`服务器IP地址: ${require('os').networkInterfaces().eth0?.[0]?.address }`);
+  console.log(`WebSocket服务器地址: ws://localhost:${PORT}`);
+  // 获取本机IP地址
+  const networkInterfaces = require('os').networkInterfaces();
+  const ipAddress = Object.values(networkInterfaces)
+    .flat()
+    .find(interface => !interface.internal && interface.family === 'IPv4')?.address;
+  if (ipAddress) {
+    console.log(`局域网WebSocket地址: ws://${ipAddress}:${PORT}`);
+  }
 });
+

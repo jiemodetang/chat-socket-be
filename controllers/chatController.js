@@ -306,6 +306,7 @@ exports.getChatMessages = async (req, res, next) => {
     const messages = await Message.find({ chat: chatId })
       .populate('sender', 'username avatar email')
       .populate('chat')
+      .select('content sender chat readBy messageType fileUrl fileName fileSize fileType duration createdAt updatedAt')
       .sort({ createdAt: 1 });
 
     // 标记消息为已读
@@ -334,7 +335,7 @@ exports.getChatMessages = async (req, res, next) => {
 // 发送消息
 exports.sendMessage = async (req, res, next) => {
   try {
-    const { content, chatId } = req.body;
+    const { content, chatId, duration } = req.body;
 
     if (!content || !chatId) {
       return next(new AppError('请提供消息内容和聊天ID', 400));
@@ -356,7 +357,8 @@ exports.sendMessage = async (req, res, next) => {
       sender: req.user._id,
       content,
       chat: chatId,
-      readBy: [req.user._id] // 发送者已读
+      readBy: [req.user._id], // 发送者已读
+      duration: duration || undefined // 添加 duration 字段
     });
 
     // 填充消息信息
@@ -380,55 +382,27 @@ exports.sendMessage = async (req, res, next) => {
   }
 };
 
-// 聊天图片上传
-// 依赖multer中间件，需在路由层引入并配置
-exports.uploadChatImage = (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
-      status: 'error',
-      message: '未检测到上传文件'
-    });
-  }
-  
-  // 获取完整的域名
-  const protocol = req.protocol;
-  const host = req.get('host');
-  const baseUrl = `${protocol}://${host}`;
-  
-  // 构建完整的图片URL
-  const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
-  
-  res.status(200).json({
-    status: 'success',
-    data: {
-      url: imageUrl
+// 上传文件
+exports.uploadFile = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return next(new AppError('请选择要上传的文件', 400));
     }
-  });
+
+    // 返回文件信息
+    res.status(201).json({
+      status: 'success',
+      data: {
+        file: {
+          url: `/uploads/${req.file.filename}`,
+          fileName: req.file.originalname,
+          fileSize: req.file.size,
+          fileType: req.file.mimetype
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
-// 聊天音频上传
-exports.uploadChatAudio = (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
-      status: 'error',
-      message: '未检测到上传文件'
-    });
-  }
-  
-  // 获取完整的域名
-  const protocol = req.protocol;
-  const host = req.get('host');
-  const baseUrl = `${protocol}://${host}`;
-  
-  // 构建完整的音频URL
-  const audioUrl = `${baseUrl}/uploads/${req.file.filename}`;
-  
-  res.status(200).json({
-    status: 'success',
-    data: {
-      url: audioUrl,
-      duration: req.body.duration || 0, // 音频时长（秒）
-      size: req.file.size // 文件大小（字节）
-    }
-  });
-};
