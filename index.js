@@ -53,6 +53,7 @@ app.use((req, res, next) => {
 });
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/avatars', express.static(path.join(__dirname, 'avatars')));
 
 // 创建HTTP服务器
 const server = http.createServer(app);

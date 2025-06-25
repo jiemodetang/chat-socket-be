@@ -127,7 +127,7 @@ module.exports = (server) => {
             const data = message.data;
             console.log('处理发送消息:', data);
             
-            const { content, chatId, messageType = 'text', fileUrl = '', duration } = data;
+            const { content, chatId, messageType = 'text', fileUrl = '', duration, fileName = '', fileSize = 0 } = data;
             
             if (!content || !chatId) {
               sendMessage(ws, 'error', { message: '消息内容和聊天ID不能为空' });
@@ -155,6 +155,8 @@ module.exports = (server) => {
               readBy: [user._id],
               messageType,
               fileUrl,
+              fileName,
+              fileSize,
               duration: duration || undefined
             });
             
@@ -255,6 +257,143 @@ module.exports = (server) => {
                 }
               });
             }
+          } else if (message.type === 'friend-request') {
+            // 处理好友请求
+            const { targetUserId } = message.data;
+            
+            // 检查目标用户是否存在
+            const targetUser = await User.findById(targetUserId);
+            if (!targetUser) {
+              sendMessage(ws, 'error', { message: '用户不存在' });
+              return;
+            }
+            
+            // 检查是否已经是好友
+            if (user.friends.includes(targetUserId)) {
+              sendMessage(ws, 'error', { message: '该用户已经是您的好友' });
+              return;
+            }
+            
+            // 检查是否已经发送过好友请求
+            const existingRequest = targetUser.friendRequests.find(
+              request => request.sender.toString() === user._id.toString() && request.status === 'pending'
+            );
+            
+            if (existingRequest) {
+              sendMessage(ws, 'error', { message: '您已经向该用户发送过好友请求' });
+              return;
+            }
+            
+            // 添加好友请求
+            targetUser.friendRequests.push({
+              sender: user._id,
+              status: 'pending',
+              createdAt: Date.now()
+            });
+            
+            await targetUser.save({ validateBeforeSave: false });
+            
+            // 如果目标用户在线，发送通知
+            const targetWs = onlineUsers.get(targetUserId);
+            if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+              // 获取完整的请求信息以便前端显示
+              const populatedUser = await User.findById(user._id).select('username avatar email');
+              
+              sendMessage(targetWs, 'friend-request-received', {
+                request: {
+                  sender: populatedUser,
+                  status: 'pending',
+                  createdAt: Date.now()
+                }
+              });
+            }
+            
+            sendMessage(ws, 'friend-request-sent', {
+              message: '好友请求已发送',
+              targetUser: {
+                _id: targetUser._id,
+                username: targetUser.username,
+                avatar: targetUser.avatar
+              }
+            });
+            
+          } else if (message.type === 'friend-request-response') {
+            // 处理好友请求响应
+            const { requestId, response } = message.data;
+            
+            if (!['accepted', 'rejected'].includes(response)) {
+              sendMessage(ws, 'error', { message: '无效的响应' });
+              return;
+            }
+            
+            // 查找请求
+            const userDoc = await User.findById(user._id);
+            const requestIndex = userDoc.friendRequests.findIndex(
+              request => request._id.toString() === requestId
+            );
+            
+            if (requestIndex === -1) {
+              sendMessage(ws, 'error', { message: '未找到该好友请求' });
+              return;
+            }
+            
+            const request = userDoc.friendRequests[requestIndex];
+            
+            if (request.status !== 'pending') {
+              sendMessage(ws, 'error', { message: '该请求已被处理' });
+              return;
+            }
+            
+            const senderId = request.sender;
+            const sender = await User.findById(senderId);
+            
+            if (!sender) {
+              sendMessage(ws, 'error', { message: '请求发送者不存在' });
+              return;
+            }
+            
+            // 更新请求状态
+            userDoc.friendRequests[requestIndex].status = response;
+            
+            if (response === 'accepted') {
+              // 添加好友关系（双向）
+              if (!userDoc.friends.includes(senderId)) {
+                userDoc.friends.push(senderId);
+              }
+              
+              if (!sender.friends.includes(user._id)) {
+                sender.friends.push(user._id);
+              }
+              
+              await sender.save({ validateBeforeSave: false });
+            }
+            
+            await userDoc.save({ validateBeforeSave: false });
+            
+            // 如果发送者在线，发送通知
+            const senderWs = onlineUsers.get(senderId.toString());
+            if (senderWs && senderWs.readyState === WebSocket.OPEN) {
+              if (response === 'accepted') {
+                sendMessage(senderWs, 'friend-request-accepted', {
+                  message: '好友请求已接受',
+                  user: {
+                    _id: user._id,
+                    username: user.username,
+                    avatar: user.avatar
+                  }
+                });
+              } else {
+                sendMessage(senderWs, 'friend-request-rejected', {
+                  message: '好友请求已拒绝',
+                  userId: user._id
+                });
+              }
+            }
+            
+            sendMessage(ws, 'friend-request-processed', {
+              message: response === 'accepted' ? '已接受好友请求' : '已拒绝好友请求',
+              requestId
+            });
           } else if (message.type === 'call') {
             // 处理发起通话请求
             const { targetUserId, callType, roomId } = message.data;
