@@ -65,6 +65,9 @@ router.post('/friend-request/reject', userController.rejectFriendRequest);
 // 删除好友
 router.delete('/friends/:friendId', userController.removeFriend);
 
+// 修改好友备注
+router.patch('/friends/:friendId/remark', userController.updateFriendRemark);
+
 // 上传用户头像
 router.post('/avatar', upload.single('avatar'), userController.uploadAvatar);
 

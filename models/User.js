@@ -32,8 +32,14 @@ const userSchema = new mongoose.Schema({
     default: 'offline'
   },
   friends: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    remark: {
+      type: String,
+      default: ''
+    }
   }],
   friendRequests: [{
     sender: {

@@ -124,10 +124,9 @@ module.exports = (server) => {
           }
           
           if (message.type === 'send-message') {
-            const data = message.data;
-            console.log('处理发送消息:', data);
+            console.log('处理发送消息:', message.data);
             
-            const { content, chatId, messageType = 'text', fileUrl = '', duration, fileName = '', fileSize = 0 } = data;
+            const { content, chatId, messageType = 'text', fileUrl = '', duration, fileName = '', fileSize = 0 } = message.data;
             
             if (!content || !chatId) {
               sendMessage(ws, 'error', { message: '消息内容和聊天ID不能为空' });
@@ -223,22 +222,22 @@ module.exports = (server) => {
             }
           } else if (message.type === 'mark-read') {
             const { messageId } = message.data;
-            const message = await Message.findById(messageId);
+            const foundMessage = await Message.findById(messageId);
             
-            if (!message) {
+            if (!foundMessage) {
               sendMessage(ws, 'error', { message: '消息不存在' });
               return;
             }
             
             // 检查用户是否在聊天中
-            const chat = await Chat.findById(message.chat);
+            const chat = await Chat.findById(foundMessage.chat);
             if (!chat.users.includes(user._id)) {
               sendMessage(ws, 'error', { message: '您不是该聊天的成员' });
               return;
             }
             
             // 标记消息为已读
-            if (!message.readBy.includes(user._id)) {
+            if (!foundMessage.readBy.includes(user._id)) {
               await Message.findByIdAndUpdate(messageId, {
                 $addToSet: { readBy: user._id }
               });

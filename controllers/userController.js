@@ -1,5 +1,7 @@
 const User = require('../models/User');
 const { AppError } = require('../utils/errorHandler');
+const Chat = require('../models/Chat');
+const Message = require('../models/Message');
 
 // 获取所有用户
 exports.getAllUsers = async (req, res, next) => {
@@ -180,14 +182,22 @@ exports.acceptFriendRequest = async (req, res, next) => {
     user.friendRequests[requestIndex].status = 'accepted';
     
     // 添加好友关系（双向）
-    if (!user.friends.includes(senderId)) {
-      user.friends.push(senderId);
+    const alreadyFriend = user.friends.some(f => f.user.toString() === senderId.toString());
+    if (!alreadyFriend) {
+      user.friends.push({
+        user: senderId,
+        remark: ''
+      });
     }
     
     await user.save({ validateBeforeSave: false });
     
-    if (!sender.friends.includes(user._id)) {
-      sender.friends.push(user._id);
+    const senderAlreadyFriend = sender.friends.some(f => f.user.toString() === user._id.toString());
+    if (!senderAlreadyFriend) {
+      sender.friends.push({
+        user: user._id,
+        remark: ''
+      });
     }
     
     await sender.save({ validateBeforeSave: false });
@@ -198,7 +208,7 @@ exports.acceptFriendRequest = async (req, res, next) => {
       data: {
         user: await User.findById(user._id)
           .select('-password')
-          .populate('friends', '-password')
+          .populate('friends.user', '-password')
       }
     });
   } catch (error) {
@@ -286,24 +296,41 @@ exports.removeFriend = async (req, res, next) => {
     
     // 检查是否是好友
     const user = await User.findById(req.user._id);
-    if (!user.friends.includes(friendId)) {
+    const isFriend = user.friends.some(f => f.user.toString() === friendId);
+    
+    if (!isFriend) {
       return next(new AppError('该用户不是您的好友', 400));
     }
     
     // 删除好友（双向）
     user.friends = user.friends.filter(
-      id => id.toString() !== friendId
+      f => f.user.toString() !== friendId
     );
     await user.save({ validateBeforeSave: false });
     
     friend.friends = friend.friends.filter(
-      id => id.toString() !== user._id.toString()
+      f => f.user.toString() !== user._id.toString()
     );
     await friend.save({ validateBeforeSave: false });
     
+    // 查找并删除两人之间的私聊
+    const privateChat = await Chat.findOne({
+      isGroupChat: false,
+      users: { $all: [user._id, friendId], $size: 2 }
+    });
+    
+    // 如果存在私聊，则删除聊天及其所有消息
+    if (privateChat) {
+      // 删除聊天中的所有消息
+      await Message.deleteMany({ chat: privateChat._id });
+      
+      // 删除聊天
+      await Chat.findByIdAndDelete(privateChat._id);
+    }
+    
     res.status(200).json({
       status: 'success',
-      message: '成功删除好友',
+      message: '成功删除好友及相关聊天',
       data: {
         user: await User.findById(user._id).select('-password')
       }
@@ -317,7 +344,7 @@ exports.removeFriend = async (req, res, next) => {
 exports.getFriends = async (req, res, next) => {
   try {
     const user = await User.findById(req.user._id)
-      .populate('friends', '-password')
+      .populate('friends.user', '-password')
       .select('-password');
     
     res.status(200).json({
@@ -394,6 +421,55 @@ exports.uploadAvatar = async (req, res, next) => {
           fileName: req.file.originalname,
           fileSize: req.file.size,
           fileType: req.file.mimetype
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 修改好友备注
+exports.updateFriendRemark = async (req, res, next) => {
+  try {
+    const { friendId } = req.params;
+    const { remark } = req.body;
+    
+    if (!remark && remark !== '') {
+      return next(new AppError('请提供备注内容', 400));
+    }
+    
+    // 检查好友是否存在
+    const friend = await User.findById(friendId);
+    if (!friend) {
+      return next(new AppError('未找到该用户', 404));
+    }
+    
+    // 获取当前用户
+    const user = await User.findById(req.user._id);
+    
+    // 检查是否是好友
+    const friendIndex = user.friends.findIndex(
+      f => f.user.toString() === friendId
+    );
+    
+    if (friendIndex === -1) {
+      return next(new AppError('该用户不是您的好友', 400));
+    }
+    
+    // 更新备注
+    user.friends[friendIndex].remark = remark;
+    await user.save({ validateBeforeSave: false });
+    
+    res.status(200).json({
+      status: 'success',
+      message: '好友备注已更新',
+      data: {
+        friend: {
+          _id: friend._id,
+          username: friend.username,
+          avatar: friend.avatar,
+          remark: remark
         }
       }
     });
